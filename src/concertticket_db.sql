@@ -164,6 +164,56 @@ INSERT INTO Employee VALUES
 
 
 
+--PROCEDURE: Get Customer Bookings
+-- Example:
+-- CALL Get_Customer_Bookings(50042);
+DELIMITER //
+
+CREATE PROCEDURE Get_Customer_Bookings(IN customerID INT)
+BEGIN
+
+    SELECT
+        Customer.customer_id,
+        Customer.name,
+        Booking.booking_number,
+        Booking.purchase_date,
+        Ticket.ticket_id,
+        Ticket.seat_type,
+        Ticket.price,
+        Ticket.ticket_status
+    FROM Customer
+    JOIN Booking ON Customer.customer_id = Booking.customer_id
+    JOIN Ticket ON Booking.booking_id = Ticket.booking_id
+    WHERE Customer.customer_id = customerID;
+
+END //
+
+DELIMITER ;
+
+
+
+-- FUNCTION: Get Concert Revenue
+-- Example:
+-- SELECT Get_Concert_Revenue(30043) AS total_revenue;
+DELIMITER //
+
+CREATE FUNCTION Get_Concert_Revenue(concertID INT)
+RETURNS DECIMAL(10, 2)
+BEGIN
+
+    DECLARE totalRevenue DECIMAL(10, 2);
+
+    SELECT SUM(price)
+    INTO totalRevenue
+    FROM Ticket
+    WHERE concert_id = concertID;
+
+    RETURN totalRevenue;
+
+END //
+
+DELIMITER ;
+
 
 
 
