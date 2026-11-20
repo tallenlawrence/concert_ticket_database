@@ -1,6 +1,15 @@
-CREATE SCHEMA ConcertTicketDB;
+CREATE SCHEMA IF NOT EXISTS ConcertTicketDB;
 USE ConcertTicketDB;
 
+DROP TABLE IF EXISTS Employee;
+DROP TABLE IF EXISTS Concert_Performer;
+DROP TABLE IF EXISTS Performer;
+DROP TABLE IF EXISTS Ticket;
+DROP TABLE IF EXISTS Booking;
+DROP TABLE IF EXISTS Customer;
+DROP TABLE IF EXISTS Concert;
+DROP TABLE IF EXISTS Venue;
+DROP TABLE IF EXISTS Reward_Tier;
 
 CREATE TABLE Reward_Tier (
 tier_id INT PRIMARY KEY,
@@ -21,6 +30,7 @@ CREATE TABLE Concert (
 concert_id INT PRIMARY KEY,
 concert_date DATE NOT NULL,
 start_time TIME NOT NULL,
+sold_out BOOLEAN DEFAULT FALSE,
 venue_id INT NOT NULL,
 FOREIGN KEY (venue_id) REFERENCES Venue(venue_id)
 );
@@ -52,7 +62,7 @@ seat_type VARCHAR(100) NOT NULL,
 seat_num VARCHAR(100) NOT NULL,
 price DECIMAL(10, 2) NOT NULL,
 ticket_status VARCHAR(100) NOT NULL,
-booking_id INT NOT NULL,
+booking_id INT,
 concert_id INT NOT NULL,
 FOREIGN KEY (booking_id) REFERENCES Booking(booking_id),
 FOREIGN KEY (concert_id) REFERENCES Concert(concert_id),
@@ -99,14 +109,12 @@ INSERT INTO Venue VALUES
 (20005, 'Gabes', 'Iowa' , 'Iowa City', 400, 2543.43);
 
 INSERT INTO Concert VALUES
-(30039, '2026-10-03', '18:30:00', 20001),
-(30040, '2026-12-03', '19:30:00', 20001),
-(30041, '2026-12-05', '20:00:00', 20005),
-(30042, '2027-02-08', '20:30:00', 20004),
-(30043, '2027-02-10', '19:45:00', 20002),
-(30044, '2027-03-15', '20:00:00', 20001);
-
-
+(30039, '2026-10-03', '18:30:00', False, 20001),
+(30040, '2026-12-03', '19:30:00', False, 20001),
+(30041, '2026-12-05', '20:00:00', False, 20005),
+(30042, '2027-02-08', '20:30:00', False, 20004),
+(30043, '2027-02-10', '19:45:00', False, 20002),
+(30044, '2027-03-15', '20:00:00', False, 20001);
 
 INSERT INTO Customer VALUES
 (50041, 'Alex Johnson', 24, 'Male', '8154043782', 101),
@@ -114,8 +122,6 @@ INSERT INTO Customer VALUES
 (50043, 'Jordan Williams', 22, 'Male', '4152222956', 102),
 (50044, 'Morgan Davis', 31, 'Female', '3133334044', 101),
 (50055, 'Casey Brown', 26, 'Male', '2222222222', 104);
-
-
 
 INSERT INTO Booking VALUES
 (44000, 3002, '2026-10-03 08:23:31', 'Visa', 50041),
@@ -130,9 +136,8 @@ INSERT INTO Ticket VALUES
 (62033, 'Regular', 'B2402', 45.45, 'Active', 44002, 30044),
 (62034, 'Regular', 'B2403', 45.45, 'Active', 44002, 30044),
 (62035, 'VIP', 'A300', 345.25, 'Active', 44003, 30040),
-(62036, 'Floor', 'F001', 25.34, 'Active', 44004, 30041);
-
-
+(62036, 'Floor', 'F001', 25.34, 'Active', 44004, 30041),
+(62037, 'Floor', 'F002', 25.34, 'Active', NULL, 30041);
 
 INSERT INTO Performer VALUES
 (80023, 'Clarion', 'Shoegaze'),
@@ -151,13 +156,34 @@ INSERT INTO Concert_Performer VALUES
 (30040, 80019),
 (30044, 80023);
 
-
 INSERT INTO Employee VALUES
 (10306, 'James Wilson', 'Security', 300.40, 20003),
 (10307, 'Michael Brown', 'Production Manager', 843.35, 20001),
 (10308, 'David Miller', 'Production Crew', 256.32, 20002),
 (10309, 'Chris Anderson', 'Security', 210.40, 20004),
 (10310, 'Daniel Taylor', 'Production Crew', 48.03, 20005);
+
+-- Trigger - set concert sold_out to true if all tickets become unavailable
+DROP TRIGGER IF EXISTS update_ticket;
+DELIMITER $$
+
+CREATE TRIGGER update_ticket
+AFTER UPDATE ON Ticket
+FOR EACH ROW
+BEGIN
+	IF(SELECT COUNT(booking_id) = COUNT(*) FROM Ticket WHERE concert_id = NEW.concert_id)
+    THEN
+		UPDATE Concert
+			SET sold_out = TRUE WHERE concert_id = NEW.concert_id;
+	END IF;
+END$$
+DELIMITER ;
+
+-- testing trigger
+
+SELECT * FROM Concert WHERE concert_id = 30041;
+UPDATE Ticket SET booking_id = 44004 WHERE ticket_id = 62037;
+SELECT * FROM Concert WHERE concert_id = 30041;
 
 -- Query 1 - show all upcoming shows at Gabe's - aggregate and join
 SELECT 
@@ -189,13 +215,7 @@ SELECT COUNT(*) AS ticket_count, SUM(t.price) AS total_cost
 FROM Ticket t
 WHERE t.booking_id = 44002;
 
-
-SELECT 
-
-
-
-
---PROCEDURE: Get Customer Bookings
+-- PROCEDURE: Get Customer Bookings
 -- Example:
 -- CALL Get_Customer_Bookings(50042);
 DELIMITER //
