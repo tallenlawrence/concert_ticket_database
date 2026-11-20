@@ -2,10 +2,15 @@
 CREATE SCHEMA IF NOT EXISTS ConcertTicketDB;
 USE ConcertTicketDB;
 
+-- Drop existing views, procedures, functions, and triggers before recreating
 DROP VIEW IF EXISTS tier_summary;
 DROP VIEW IF EXISTS loyalty;
 DROP PROCEDURE IF EXISTS Get_Customer_Bookings;
 DROP FUNCTION IF EXISTS Get_Concert_Revenue;
+
+DROP TRIGGER IF EXISTS auto_upgrade;
+DROP TRIGGER IF EXISTS payment_validation;
+DROP TRIGGER IF EXISTS update_ticket;
 
 DROP TABLE IF EXISTS Employee;
 DROP TABLE IF EXISTS Concert_Performer;
@@ -169,8 +174,7 @@ INSERT INTO Employee VALUES
 (10309, 'Chris Anderson', 'Security', 210.40, 20004),
 (10310, 'Daniel Taylor', 'Production Crew', 48.03, 20005);
 
-
--- Auto Upgrades 
+-- Auto Upgrades
 DELIMITER $$ 
 CREATE TRIGGER auto_upgrade
 AFTER INSERT ON Ticket
@@ -180,7 +184,7 @@ BEGIN
       DECLARE t_total INT;
 
       IF NEW.booking_id IS NOT NULL THEN
- 
+
           SELECT customer_id INTO c_customer_id FROM
           Booking WHERE booking_id = NEW.booking_id;
 
@@ -208,7 +212,8 @@ BEGIN
         SET NEW.purchase_date = NOW();
     END IF;
 
-    IF NEW.payment_method NOT IN('Card', 'CashApp', 'Paypal', 'Apple Pay', 'Visa', 'MasterCard') THEN 
+    IF NEW.payment_method IS NULL OR
+       NEW.payment_method NOT IN('Card', 'CashApp', 'Paypal', 'Apple Pay', 'Visa', 'MasterCard') THEN 
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Payment not supported.';
     END IF;
@@ -217,7 +222,6 @@ DELIMITER ;
 
 
 -- Trigger - set concert sold_out to true if all tickets become unavailable
-DROP TRIGGER IF EXISTS update_ticket;
 DELIMITER $$
 
 CREATE TRIGGER update_ticket
@@ -238,36 +242,6 @@ DELIMITER ;
 SELECT * FROM Concert WHERE concert_id = 30041;
 UPDATE Ticket SET booking_id = 44004 WHERE ticket_id = 62037;
 SELECT * FROM Concert WHERE concert_id = 30041;
-
-
--- Check Loyalty Status
-CREATE VIEW loyalty AS
-SELECT c.customer_id,
-       c.name,
-       COUNT(t.ticket_id) AS total_tick_bought,
-       rt.tier_name AS current_tier,
-       rt.threshold AS current_threshold
-FROM Customer c
-JOIN Reward_Tier rt ON rt.tier_id = c.tier_id
-LEFT JOIN Booking b ON b.customer_id = c.customer_id
-LEFT JOIN Ticket t ON t.booking_id = b.booking_id
-GROUP BY c.customer_id, c.name, rt.tier_name, rt.threshold;
-
-
--- Tier Summary
-
-CREATE VIEW tier_summary AS
-SELECT rt.tier_id,
-       rt.tier_name,
-       rt.threshold,
-       COUNT(DISTINCT c.customer_id) AS num_customers,
-       COUNT(t.ticket_id) AS total_tickets
-FROM Reward_Tier rt
-JOIN Customer c ON c.tier_id = rt.tier_id
-JOIN Booking b ON b.customer_id = c.customer_id
-JOIN Ticket t ON t.booking_id = b.booking_id
-GROUP BY rt.tier_id, rt.tier_name, rt.threshold
-ORDER BY rt.threshold;
 
 
 -- Query 1 - show all upcoming shows at Gabe's - aggregate and join
@@ -316,6 +290,35 @@ GROUP BY c.concert_id, c.concert_date;
 
 -- Query 5 - Show customers who purchased more than the average number of tickets
 -- Uses loyalty view and a subquery
+
+-- Check Loyalty Status
+CREATE VIEW loyalty AS
+SELECT c.customer_id,
+       c.name,
+       COUNT(t.ticket_id) AS total_tick_bought,
+       rt.tier_name AS current_tier,
+       rt.threshold AS current_threshold
+FROM Customer c
+JOIN Reward_Tier rt ON rt.tier_id = c.tier_id
+LEFT JOIN Booking b ON b.customer_id = c.customer_id
+LEFT JOIN Ticket t ON t.booking_id = b.booking_id
+GROUP BY c.customer_id, c.name, rt.tier_name, rt.threshold;
+
+
+-- Tier Summary
+CREATE VIEW tier_summary AS
+SELECT rt.tier_id,
+       rt.tier_name,
+       rt.threshold,
+       COUNT(DISTINCT c.customer_id) AS num_customers,
+       COUNT(t.ticket_id) AS total_tickets
+FROM Reward_Tier rt
+JOIN Customer c ON c.tier_id = rt.tier_id
+JOIN Booking b ON b.customer_id = c.customer_id
+JOIN Ticket t ON t.booking_id = b.booking_id
+GROUP BY rt.tier_id, rt.tier_name, rt.threshold
+ORDER BY rt.threshold;
+
 
 SELECT
     customer_id,
@@ -366,6 +369,8 @@ DELIMITER //
 
 CREATE FUNCTION Get_Concert_Revenue(concertID INT)
 RETURNS DECIMAL(10, 2)
+NOT DETERMINISTIC
+READS SQL DATA
 BEGIN
 
     DECLARE totalRevenue DECIMAL(10, 2);
