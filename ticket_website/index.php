@@ -3,6 +3,69 @@ require_once 'db.php';
 session_start();
 
 /* ============================================================
+   ACCESS CONTROL (roles: staff / manager)
+   ------------------------------------------------------------
+   - Everyone starts as STAFF. Switching to MANAGER needs the password.
+   - Manager = full access (uses the db.php connection).
+   - Staff   = limited. Besides the UI limits below, staff connects to MySQL
+     as the limited user created at the bottom of the .sql file, so the
+     database itself also refuses anything staff shouldn't do.
+   To change staff permissions, edit $STAFF_TABLES here AND the GRANTs
+   in the .sql file.
+   ============================================================ */
+define('MANAGER_PASS_SHA256', 'f8b6a971ee769eeb6134c9d6c18b07521fc6a2e1da7b1c7eb2f437d8c90027e3');
+$STAFF_DB = ['user' => 'concert_staff', 'pass' => 'staff_pass_123'];
+
+// Tables staff can see. 'r' = read only, 'rw' = read + add + edit (never delete).
+// Anything not listed (e.g. Employee) is hidden from staff.
+$STAFF_TABLES = [
+    'Reward_Tier'       => 'r',
+    'Venue'             => 'r',
+    'Concert'           => 'r',
+    'Performer'         => 'r',
+    'Concert_Performer' => 'r',
+    'Customer'          => 'rw',
+    'Booking'           => 'rw',
+    'Ticket'            => 'rw',
+];
+$STAFF_PAGES = ['home', 'tables', 'queries', 'views'];   // manager also gets 'triggers'
+
+function isManager() { return ($_SESSION['role'] ?? 'staff') === 'manager'; }
+function roleName()  { return isManager() ? 'manager' : 'staff'; }
+function canRead($t) {
+    global $STAFF_TABLES;
+    return isManager() || isset($STAFF_TABLES[$t]);
+}
+function canWrite($t) {   // add + edit records
+    global $STAFF_TABLES;
+    return isManager() || (($STAFF_TABLES[$t] ?? '') === 'rw');
+}
+function canDelete() { return isManager(); }
+
+if (!isset($_SESSION['role'])) $_SESSION['role'] = 'staff';
+
+// Role switching (handled before anything touches the database)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['do'] ?? '', ['role_manager', 'role_staff'], true)) {
+    if ($_POST['do'] === 'role_staff') {
+        $_SESSION['role'] = 'staff';
+        session_regenerate_id(true);
+        $_SESSION['flash'][] = ['ok', 'Switched to STAFF.'];
+    } else {
+        $try = hash('sha256', (string)($_POST['password'] ?? ''));
+        if (hash_equals(MANAGER_PASS_SHA256, $try)) {
+            $_SESSION['role'] = 'manager';
+            session_regenerate_id(true);
+            $_SESSION['flash'][] = ['ok', 'Switched to MANAGER.'];
+        } else {
+            sleep(1);
+            $_SESSION['flash'][] = ['err', 'Wrong manager password.'];
+        }
+    }
+    header('Location: index.php');
+    exit;
+}
+
+/* ============================================================
    HELPERS
    ============================================================ */
 function h($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
@@ -170,8 +233,29 @@ foreach ($found as $f) {
     if (!in_array(strtolower($f), array_map('strtolower', $tables)) && strtolower($f) !== 'saved_query') $tables[] = $f;
 }
 
+// Staff only sees the tables they are allowed to read
+$tables = array_values(array_filter($tables, 'canRead'));
+
+// Staff talks to MySQL as the limited user, so the database enforces the limits too.
+// Bootstrap + table discovery above ran on the db.php connection.
+$dbWarn = '';
+if (!isManager()) {
+    try {
+        $staffConn = new mysqli($host, $STAFF_DB['user'], $STAFF_DB['pass'], $dbname);
+        $staffConn->set_charset('utf8mb4');
+        $conn = $staffConn;
+    } catch (mysqli_sql_exception $e) {
+        $dbWarn = 'Staff database user not found - only page-level limits are active. Re-import the .sql file to create it.';
+    }
+}
+
+$allowedPages = isManager() ? array_merge($STAFF_PAGES, ['triggers']) : $STAFF_PAGES;
 $page = $_GET['page'] ?? (isset($_GET['table']) ? 'tables' : 'home');
 if (!in_array($page, ['home', 'tables', 'queries', 'views', 'triggers'])) $page = 'home';
+if (!in_array($page, $allowedPages, true)) {
+    flash('err', 'Manager access required for that page.');
+    go('index.php');
+}
 
 /* ============================================================
    POST ACTIONS (redirect after post, messages via flash)
@@ -180,6 +264,17 @@ $adhoc = null; $adhocSql = ''; $adhocDesc = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $do = $_POST['do'] ?? '';
+
+    // Server-side permission gate (hiding buttons is not enough)
+    $managerOnly = ['query_run', 'query_save', 'query_delete', 'view_save', 'view_drop',
+                    'trigger_save', 'trigger_drop', 'table_create', 'table_drop', 'rec_delete'];
+    $deny = false;
+    if (in_array($do, $managerOnly, true) && !isManager()) $deny = true;
+    if (in_array($do, ['rec_create', 'rec_update'], true) && !canWrite($_POST['table'] ?? '')) $deny = true;
+    if ($deny) {
+        flash('err', 'Permission denied: manager access required.');
+        go('index.php');
+    }
 
     if ($do === 'query_run') {
         // run without saving, rendered directly
@@ -379,7 +474,7 @@ function queryList($conn, $ctx, $crud, $tbl) {
         $extra = $tbl ? '&table=' . urlencode($tbl) : '';
         echo '<tr><td>' . $id . '</td><td>' . h($q['label']) . '</td><td class="wrap">' . h($q['description']) . '</td><td class="act">';
         echo '<a class="btn" href="index.php?page=' . $ctx . '&run=' . $id . $extra . '#results">Run</a> ';
-        if ($crud) {
+        if ($crud && isManager()) {
             echo '<a class="btn" href="index.php?page=queries&edit=' . $id . '#form">Edit</a> ';
             echo '<form method="post" action="index.php" onsubmit="return confirm(\'Delete this query?\');">'
                . '<input type="hidden" name="do" value="query_delete"><input type="hidden" name="query_id" value="' . $id . '">'
@@ -394,7 +489,10 @@ function recordsPanel($conn, $t, $ret) {
     [$cols, $pks] = getCols($conn, $t);
     $base = "index.php?page=$ret&table=" . urlencode($t);
     $edit = null;
-    if ($pks && isset($_GET['edit'])) {
+    $mayWrite = canWrite($t);
+    $mayDelete = canDelete();
+    $showActions = $pks && ($mayWrite || $mayDelete);
+    if ($mayWrite && $pks && isset($_GET['edit'])) {
         $w = []; $v = []; $ty = '';
         foreach ($pks as $pk) { $w[] = "`$pk` = ?"; $v[] = $_GET['pk_' . $pk] ?? ''; $ty .= 's'; }
         $st = $conn->prepare("SELECT * FROM `$t` WHERE " . implode(' AND ', $w));
@@ -403,6 +501,7 @@ function recordsPanel($conn, $t, $ret) {
         $edit = $st->get_result()->fetch_assoc();
     }
     ?>
+    <?php if ($mayWrite): ?>
     <div class="win" id="rec">
         <h2><?= $edit ? 'Edit record' : 'Add new record' ?> :: <?= h($t) ?></h2>
         <div class="body">
@@ -426,27 +525,29 @@ function recordsPanel($conn, $t, $ret) {
             </form>
         </div>
     </div>
+    <?php endif; ?>
 
     <?php $rows = $conn->query("SELECT * FROM `$t`"); ?>
     <div class="win">
-        <h2><?= h($t) ?> :: <?= $rows->num_rows ?> row(s)</h2>
+        <h2><?= h($t) ?> :: <?= $rows->num_rows ?> row(s)<?= $mayWrite ? '' : ' :: read-only' ?></h2>
         <div class="body">
             <div class="sunken">
                 <table class="grid">
                     <tr>
                         <?php foreach ($cols as $c): ?><th><?= h($c['Field']) ?></th><?php endforeach; ?>
-                        <?php if ($pks): ?><th>Actions</th><?php endif; ?>
+                        <?php if ($showActions): ?><th>Actions</th><?php endif; ?>
                     </tr>
                     <?php while ($row = $rows->fetch_assoc()): ?>
                         <tr>
                             <?php foreach ($cols as $c): ?><td><?= cell($row[$c['Field']]) ?></td><?php endforeach; ?>
-                            <?php if ($pks): ?>
+                            <?php if ($showActions): ?>
                                 <td class="act">
                                     <?php
                                     $qs = $base . "&edit=1";
                                     foreach ($pks as $pk) $qs .= "&pk_" . urlencode($pk) . "=" . urlencode($row[$pk]);
                                     ?>
-                                    <a class="btn" href="<?= h($qs) ?>#rec">Edit</a>
+                                    <?php if ($mayWrite): ?><a class="btn" href="<?= h($qs) ?>#rec">Edit</a><?php endif; ?>
+                                    <?php if ($mayDelete): ?>
                                     <form method="post" action="index.php" onsubmit="return confirm('Delete this record?');">
                                         <input type="hidden" name="do" value="rec_delete">
                                         <input type="hidden" name="table" value="<?= h($t) ?>">
@@ -456,6 +557,7 @@ function recordsPanel($conn, $t, $ret) {
                                         <?php endforeach; ?>
                                         <button class="btn danger">Delete</button>
                                     </form>
+                                    <?php endif; ?>
                                 </td>
                             <?php endif; ?>
                         </tr>
@@ -498,7 +600,10 @@ $nav = ['home' => 'Home', 'tables' => 'Tables', 'queries' => 'Queries', 'views' 
     .btn, button { font: inherit; background: #c0c0c0; color: #000; border: 2px solid; border-color: #fff #404040 #404040 #fff; padding: 0 8px; cursor: pointer; text-decoration: none; display: inline-block; line-height: 1.4; }
     .btn:active, button:active { border-color: #404040 #fff #fff #404040; }
     .btn.danger { color: #a00000; }
-    input[type=text], input[type=number], select, textarea { font: inherit; background: #fff; border: 2px solid; border-color: #404040 #fff #fff #404040; padding: 1px 4px; width: 100%; }
+    .rolebadge { text-align: center; font-weight: bold; padding: 2px; margin-bottom: 4px; border: 2px solid; border-color: #404040 #fff #fff #404040; background: #fff; }
+    .rolebadge.manager { color: #a00000; }
+    .rolebadge.staff { color: #006000; }
+    input[type=text], input[type=number], input[type=password], select, textarea { font: inherit; background: #fff; border: 2px solid; border-color: #404040 #fff #fff #404040; padding: 1px 4px; width: 100%; }
     select { width: auto; min-width: 180px; }
     textarea { resize: vertical; }
     .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 10px; margin-bottom: 6px; }
@@ -523,14 +628,30 @@ $nav = ['home' => 'Home', 'tables' => 'Tables', 'queries' => 'Queries', 'views' 
     <div class="win side">
         <h2>ConcertDB.exe</h2>
         <div class="body" style="padding:4px;">
-            <?php foreach ($nav as $k => $label): ?>
+            <?php foreach ($nav as $k => $label): if (!in_array($k, $allowedPages, true)) continue; ?>
                 <a href="index.php?page=<?= $k ?>" class="<?= $page === $k ? 'on' : '' ?>">&gt; <?= $label ?></a>
             <?php endforeach; ?>
+        </div>
+
+        <h2 style="margin-top:4px;">Role</h2>
+        <div class="body">
+            <div class="rolebadge <?= roleName() ?>"><?= strtoupper(roleName()) ?></div>
+            <form method="post" action="index.php">
+                <?php if (isManager()): ?>
+                    <input type="hidden" name="do" value="role_staff">
+                    <button class="btn" style="width:100%;">Switch to Staff</button>
+                <?php else: ?>
+                    <input type="hidden" name="do" value="role_manager">
+                    <input type="password" name="password" placeholder="manager password" autocomplete="off" style="margin-bottom:4px;">
+                    <button class="btn" style="width:100%;">Switch to Manager</button>
+                <?php endif; ?>
+            </form>
         </div>
     </div>
 
     <!-- MAIN -->
     <div>
+    <?php if ($dbWarn): ?><div class="msg err"><?= h($dbWarn) ?></div><?php endif; ?>
     <?php foreach ($flashes as $f): ?>
         <div class="msg <?= $f[0] === 'ok' ? 'ok' : 'err' ?>"><?= h($f[1]) ?></div>
     <?php endforeach; ?>
@@ -591,16 +712,19 @@ $nav = ['home' => 'Home', 'tables' => 'Tables', 'queries' => 'Queries', 'views' 
                     <td><?= h($t) ?></td><td><?= $nc ?></td><td><?= $n ?></td>
                     <td class="act">
                         <a class="btn" href="index.php?page=tables&table=<?= urlencode($t) ?>#rec">Open</a>
+                        <?php if (isManager()): ?>
                         <form method="post" action="index.php" onsubmit="return confirm('DROP table <?= h($t) ?> and all its data?');">
                             <input type="hidden" name="do" value="table_drop"><input type="hidden" name="table" value="<?= h($t) ?>">
                             <button class="btn danger">Drop</button>
                         </form>
+                        <?php endif; ?>
                     </td>
                 </tr>
             <?php endforeach; ?>
         </table></div>
     </div></div>
 
+    <?php if (isManager()): ?>
     <div class="win"><h2>New Table</h2><div class="body">
         <form method="post" action="index.php">
             <input type="hidden" name="do" value="table_create">
@@ -609,12 +733,13 @@ $nav = ['home' => 'Home', 'tables' => 'Tables', 'queries' => 'Queries', 'views' 
             <p><button class="btn">Create Table</button></p>
         </form>
     </div></div>
+    <?php endif; ?>
 
     <?php if ($sel) recordsPanel($conn, $sel, 'tables'); ?>
 
 <?php /* ===================== QUERIES ===================== */ elseif ($page === 'queries'):
     $editQ = null;
-    if (isset($_GET['edit'])) $editQ = getSavedQuery($conn, (int)$_GET['edit']);
+    if (isManager() && isset($_GET['edit'])) $editQ = getSavedQuery($conn, (int)$_GET['edit']);
     if ($adhoc !== null) {
         $fv = ['query_id' => (int)($_POST['query_id'] ?? 0), 'label' => $_POST['label'] ?? '', 'description' => $_POST['description'] ?? '', 'sql_text' => $adhocSql];
     } elseif ($editQ) {
@@ -633,6 +758,7 @@ $nav = ['home' => 'Home', 'tables' => 'Tables', 'queries' => 'Queries', 'views' 
         resultWin($q['label'], $q['description'], $q['sql_text'], runSql($conn, $q['sql_text']));
     }
     ?>
+    <?php if (isManager()): ?>
     <div class="win" id="form"><h2><?= $fv['query_id'] ? 'Edit Query #' . (int)$fv['query_id'] : 'New Query' ?></h2><div class="body">
         <form method="post" action="index.php?page=queries">
             <input type="hidden" name="query_id" value="<?= (int)$fv['query_id'] ?>">
@@ -644,11 +770,12 @@ $nav = ['home' => 'Home', 'tables' => 'Tables', 'queries' => 'Queries', 'views' 
             <?php if ($fv['query_id']): ?><a class="btn" href="index.php?page=queries">Cancel</a><?php endif; ?>
         </form>
     </div></div>
+    <?php endif; ?>
 
 <?php /* ===================== VIEWS ===================== */ elseif ($page === 'views'):
     $views = listViews($conn);
     $viewName = $_GET['view'] ?? '';
-    $editV = $_GET['edit'] ?? '';
+    $editV = isManager() ? ($_GET['edit'] ?? '') : '';
     $fvName = ''; $fvSql = ''; $fvOrig = '';
     if ($editV && in_array(strtolower($editV), array_map('strtolower', $views)) && ident($editV)) {
         $st = $conn->prepare("SELECT VIEW_DEFINITION FROM information_schema.VIEWS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
@@ -664,11 +791,13 @@ $nav = ['home' => 'Home', 'tables' => 'Tables', 'queries' => 'Queries', 'views' 
             <?php foreach ($views as $v): ?>
                 <tr><td><?= h($v) ?></td><td class="act">
                     <a class="btn" href="index.php?page=views&view=<?= urlencode($v) ?>#results">Open</a>
+                    <?php if (isManager()): ?>
                     <a class="btn" href="index.php?page=views&edit=<?= urlencode($v) ?>#form">Edit</a>
                     <form method="post" action="index.php" onsubmit="return confirm('Drop view <?= h($v) ?>?');">
                         <input type="hidden" name="do" value="view_drop"><input type="hidden" name="name" value="<?= h($v) ?>">
                         <button class="btn danger">Drop</button>
                     </form>
+                    <?php endif; ?>
                 </td></tr>
             <?php endforeach; ?>
             <?php if (!$views): ?><tr><td colspan="2">No views.</td></tr><?php endif; ?>
@@ -679,6 +808,7 @@ $nav = ['home' => 'Home', 'tables' => 'Tables', 'queries' => 'Queries', 'views' 
         resultWin("View: $viewName", "Current contents of the view.", "SELECT * FROM `$viewName`;", runSql($conn, "SELECT * FROM `$viewName`"));
     }
     ?>
+    <?php if (isManager()): ?>
     <div class="win" id="form"><h2><?= $fvOrig ? 'Edit View: ' . h($fvOrig) : 'New View' ?></h2><div class="body">
         <form method="post" action="index.php">
             <input type="hidden" name="do" value="view_save">
@@ -689,6 +819,7 @@ $nav = ['home' => 'Home', 'tables' => 'Tables', 'queries' => 'Queries', 'views' 
             <?php if ($fvOrig): ?><a class="btn" href="index.php?page=views">Cancel</a><?php endif; ?>
         </form>
     </div></div>
+    <?php endif; ?>
 
 <?php /* ===================== TRIGGERS ===================== */ elseif ($page === 'triggers'):
     $trigs = listTriggers($conn);
