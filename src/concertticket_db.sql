@@ -190,7 +190,45 @@ FROM Ticket t
 WHERE t.booking_id = 44002;
 
 
-SELECT 
+-- Query 4 - calculate ticket sales and revenue for each concert - join and aggregate
+SELECT
+    c.concert_id,
+    c.concert_date,
+    COUNT(t.ticket_id) AS tickets_sold,
+    SUM(t.price) AS total_revenue
+FROM Concert c
+JOIN Ticket t
+ON c.concert_id = t.concert_id
+GROUP BY c.concert_id, c.concert_date;
+
+
+
+-- Query 5 - Show customers who purchased more than the average number of tickets
+-- Uses loyalty view and a subquery
+
+-- Check Loyalty Status
+CREATE VIEW loyalty AS
+SELECT c.customer_id,
+	   c.name,
+	   COUNT(t.ticket_id) AS total_tick_bought,
+	   rt.tier_name AS current_tier,
+	   rt.threshold AS current_threshold
+FROM Customer c
+JOIN Reward_Tier rt ON rt.tier_id = c.tier_id
+LEFT JOIN Booking b ON b.customer_id = c.customer_id
+LEFT JOIN Ticket t ON t.booking_id = b.booking_id
+GROUP BY  c.customer_id, c.name, rt.tier_name, rt.threshold;
+
+SELECT
+    customer_id,
+    name,
+    total_tick_bought,
+    current_tier
+FROM loyalty
+WHERE total_tick_bought > (
+    SELECT AVG(total_tick_bought)
+    FROM loyalty
+);
 
 
 
