@@ -1,7 +1,9 @@
 <?php
+// Connection settings for MySQL Server (the one managed in MySQL Workbench).
+// $pass = the root password you chose when installing MySQL.
 $host = "localhost";
 $user = "root";
-$pass = "";
+$pass = "your-root-password";
 $dbname = "ConcertTicketDB";
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
