@@ -6,7 +6,7 @@ A local web interface for the ConcertTicketDB MySQL database.
 1. Start **Apache** and **MySQL** in XAMPP.
 2. Run the SQL file once to create the database.
 3. Put `index.php` and `db.php` in `C:\xampp\htdocs\ticket_website\`.
-4. Open `http://localhost/my_site/index.php`.
+4. Open `http://localhost/ticket_website/index.php`.
 
 
 ## Sidebar
