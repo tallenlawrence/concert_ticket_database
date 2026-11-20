@@ -3,13 +3,29 @@
 A local web interface for the ConcertTicketDB MySQL database.
 
 ## Setup
-1. Start **Apache** and **MySQL** in XAMPP.
-2. Open `http://localhost/phpmyadmin`
-3. Go to Import > then Import the concertticket_db.sql file
-4. Run the SQL file once to create the database.
-5. Put `index.php` and `db.php` in `C:\xampp\htdocs\ticket_website\`.
-6. Open `http://localhost/ticket_website/index.php`.
+1. Install **MySQL Server** and **MySQL Workbench**, and make sure the MySQL service is running.
+2. In Workbench, connect as `root`, open `ConcertTicketDB.sql` (File > Open SQL Script) and run the whole script (lightning bolt). Re-run it any time you want to reset the data.
+3. Edit `db.php` and set `$pass` to your MySQL root password.
+4. Serve the site (PHP with the `mysqli` extension is required). Either:
+   - **XAMPP, Apache only:** copy `index.php` and `db.php` into `C:\xampp\htdocs\my_site\`, start only **Apache** (leave XAMPP's MySQL stopped so it doesn't clash on port 3306), and open `http://localhost/my_site/index.php`; or
+   - **PHP built-in server:** in the folder with the files run `php -S localhost:8000`, then open `http://localhost:8000/index.php`.
 
+
+## Roles (sidebar, bottom)
+Everyone starts as **Staff**. To become **Manager**, type the manager password in the sidebar box and click *Switch to Manager*. *Switch to Staff* returns to limited access.
+
+Super secret manager password: sup3raw3som3manag3r
+
+| | Staff | Manager |
+|---|---|---|
+| Tables | View Reward_Tier, Venue, Concert, Performer, Concert_Performer; view/add/edit Customer, Booking, Ticket. No Employee table. | All tables |
+| Delete records | No | Yes |
+| Create/drop tables, views, triggers | No | Yes |
+| Saved queries | Run only | Run, add, edit, delete, custom SQL |
+| Views | Open only | Open, create, edit, drop |
+| Triggers page | Hidden | Yes |
+
+Staff connects to MySQL as `concert_staff` (created at the bottom of the `.sql` file), so the database enforces these limits too. **Re-import the `.sql` file once** to create that user. Change permissions in two places: `$STAFF_TABLES` in `index.php` and the `GRANT` lines in the `.sql` file.
 
 ## Sidebar
 - **Home**: Saved Queries, then Saved Views, then a table dropdown with add-record form and its rows.
@@ -23,5 +39,3 @@ A local web interface for the ConcertTicketDB MySQL database.
 - Deletes may fail if another table references the record. Delete the child records first.
 - Saved queries are stored in an auto-created `Saved_Query` table.
 - Procedures and functions run as saved queries. Edit the ID in the SQL to change it.
-
-*Claude used for assistance with developing PHP files*
