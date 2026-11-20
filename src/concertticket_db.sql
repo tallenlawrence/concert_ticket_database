@@ -25,47 +25,51 @@ DROP TABLE IF EXISTS Reward_Tier;
 CREATE TABLE Reward_Tier (
 tier_id INT PRIMARY KEY,
 tier_name VARCHAR(100) NOT NULL,
-threshold INT,
-perk VARCHAR(250));
+threshold INT NOT NULL,
+perk VARCHAR(250) NOT NULL);
 
 CREATE TABLE Venue (
 venue_id INT PRIMARY KEY,
-venue_name VARCHAR(100),
-state VARCHAR(100),
-city VARCHAR(100),
-capacity INT,
-fixed_cost DECIMAL(12, 2)
+venue_name VARCHAR(100) NOT NULL,
+state VARCHAR(100) NOT NULL,
+city VARCHAR(100) NOT NULL,
+capacity INT NOT NULL,
+fixed_cost DECIMAL(12, 2) NOT NULL
 );
 
 CREATE TABLE Concert (
 concert_id INT PRIMARY KEY,
 concert_date DATE NOT NULL,
 start_time TIME NOT NULL,
-sold_out BOOLEAN DEFAULT FALSE,
+sold_out BOOLEAN NOT NULL DEFAULT FALSE,
 venue_id INT NOT NULL,
 FOREIGN KEY (venue_id) REFERENCES Venue(venue_id)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT
 );
-
-
 
 CREATE TABLE Customer (
 customer_id INT PRIMARY KEY,
 name VARCHAR(100) NOT NULL,
 age INT,
 sex VARCHAR(100),
-contact_number VARCHAR(100),
+contact_number VARCHAR(100) NOT NULL,
 tier_id INT NOT NULL,
 FOREIGN KEY (tier_id) REFERENCES Reward_Tier(tier_id)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT
 );
-
 
 CREATE TABLE Booking (
 booking_id INT PRIMARY KEY,
 booking_number INT NOT NULL UNIQUE,
 purchase_date TIMESTAMP,
-payment_method VARCHAR(100),
+payment_method VARCHAR(100) NOT NULL,
 customer_id INT NOT NULL,
-FOREIGN KEY (customer_id) REFERENCES Customer(customer_id));
+FOREIGN KEY (customer_id) REFERENCES Customer(customer_id)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT
+);
 
 CREATE TABLE Ticket (
 ticket_id INT PRIMARY KEY,
@@ -75,11 +79,13 @@ price DECIMAL(10, 2) NOT NULL,
 ticket_status VARCHAR(100) NOT NULL,
 booking_id INT,
 concert_id INT NOT NULL,
-FOREIGN KEY (booking_id) REFERENCES Booking(booking_id),
-FOREIGN KEY (concert_id) REFERENCES Concert(concert_id),
+FOREIGN KEY (booking_id) REFERENCES Booking(booking_id)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT,
+FOREIGN KEY (concert_id) REFERENCES Concert(concert_id)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT,
 UNIQUE (concert_id, seat_num));
-
-
 
 CREATE TABLE Performer (
 performer_id INT PRIMARY KEY,
@@ -89,11 +95,16 @@ genre VARCHAR(100)
 
 -- Junction table for M:N relationship of concert and performer
 CREATE TABLE Concert_Performer ( 
-	concert_id INT,
+    concert_id INT,
     performer_id INT,
     PRIMARY KEY (concert_id, performer_id),
-    FOREIGN KEY (concert_id) REFERENCES Concert(concert_id),
-    FOREIGN KEY (performer_id) REFERENCES Performer(performer_id));
+    FOREIGN KEY (concert_id) REFERENCES Concert(concert_id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    FOREIGN KEY (performer_id) REFERENCES Performer(performer_id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+);
 
 CREATE TABLE Employee (
 employee_id INT PRIMARY KEY,
@@ -101,7 +112,10 @@ name VARCHAR(100) NOT NULL,
 role VARCHAR(100) NOT NULL,
 pay_per_concert DECIMAL(10, 2) NOT NULL,
 venue_id INT NOT NULL,
-FOREIGN KEY (venue_id) REFERENCES Venue(venue_id));
+FOREIGN KEY (venue_id) REFERENCES Venue(venue_id)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT
+);
 
 
 
@@ -396,4 +410,4 @@ DELIMITER ;
 -- SELECT * FROM Customer;
 -- SELECT * FROM Booking;
 -- SELECT * FROM Ticket;
--- SELECT * FROM Employee;
+-- SELECT * FROM Employee
