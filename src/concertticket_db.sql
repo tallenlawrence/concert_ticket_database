@@ -1,16 +1,10 @@
-
 CREATE SCHEMA IF NOT EXISTS ConcertTicketDB;
 USE ConcertTicketDB;
 
--- Drop existing views, procedures, functions, and triggers before recreating
 DROP VIEW IF EXISTS tier_summary;
 DROP VIEW IF EXISTS loyalty;
 DROP PROCEDURE IF EXISTS Get_Customer_Bookings;
 DROP FUNCTION IF EXISTS Get_Concert_Revenue;
-
-DROP TRIGGER IF EXISTS auto_upgrade;
-DROP TRIGGER IF EXISTS payment_validation;
-DROP TRIGGER IF EXISTS update_ticket;
 
 DROP TABLE IF EXISTS Employee;
 DROP TABLE IF EXISTS Concert_Performer;
@@ -25,51 +19,47 @@ DROP TABLE IF EXISTS Reward_Tier;
 CREATE TABLE Reward_Tier (
 tier_id INT PRIMARY KEY,
 tier_name VARCHAR(100) NOT NULL,
-threshold INT NOT NULL,
-perk VARCHAR(250) NOT NULL);
+threshold INT,
+perk VARCHAR(250));
 
 CREATE TABLE Venue (
 venue_id INT PRIMARY KEY,
-venue_name VARCHAR(100) NOT NULL,
-state VARCHAR(100) NOT NULL,
-city VARCHAR(100) NOT NULL,
-capacity INT NOT NULL,
-fixed_cost DECIMAL(12, 2) NOT NULL
+venue_name VARCHAR(100),
+state VARCHAR(100),
+city VARCHAR(100),
+capacity INT,
+fixed_cost DECIMAL(12, 2)
 );
 
 CREATE TABLE Concert (
 concert_id INT PRIMARY KEY,
 concert_date DATE NOT NULL,
 start_time TIME NOT NULL,
-sold_out BOOLEAN NOT NULL DEFAULT FALSE,
+sold_out BOOLEAN DEFAULT FALSE,
 venue_id INT NOT NULL,
 FOREIGN KEY (venue_id) REFERENCES Venue(venue_id)
-    ON UPDATE CASCADE
-    ON DELETE RESTRICT
 );
+
+
 
 CREATE TABLE Customer (
 customer_id INT PRIMARY KEY,
 name VARCHAR(100) NOT NULL,
 age INT,
 sex VARCHAR(100),
-contact_number VARCHAR(100) NOT NULL,
+contact_number VARCHAR(100),
 tier_id INT NOT NULL,
 FOREIGN KEY (tier_id) REFERENCES Reward_Tier(tier_id)
-    ON UPDATE CASCADE
-    ON DELETE RESTRICT
 );
+
 
 CREATE TABLE Booking (
 booking_id INT PRIMARY KEY,
 booking_number INT NOT NULL UNIQUE,
 purchase_date TIMESTAMP,
-payment_method VARCHAR(100) NOT NULL,
+payment_method VARCHAR(100),
 customer_id INT NOT NULL,
-FOREIGN KEY (customer_id) REFERENCES Customer(customer_id)
-    ON UPDATE CASCADE
-    ON DELETE RESTRICT
-);
+FOREIGN KEY (customer_id) REFERENCES Customer(customer_id));
 
 CREATE TABLE Ticket (
 ticket_id INT PRIMARY KEY,
@@ -79,13 +69,11 @@ price DECIMAL(10, 2) NOT NULL,
 ticket_status VARCHAR(100) NOT NULL,
 booking_id INT,
 concert_id INT NOT NULL,
-FOREIGN KEY (booking_id) REFERENCES Booking(booking_id)
-    ON UPDATE CASCADE
-    ON DELETE RESTRICT,
-FOREIGN KEY (concert_id) REFERENCES Concert(concert_id)
-    ON UPDATE CASCADE
-    ON DELETE RESTRICT,
+FOREIGN KEY (booking_id) REFERENCES Booking(booking_id),
+FOREIGN KEY (concert_id) REFERENCES Concert(concert_id),
 UNIQUE (concert_id, seat_num));
+
+
 
 CREATE TABLE Performer (
 performer_id INT PRIMARY KEY,
@@ -95,16 +83,11 @@ genre VARCHAR(100)
 
 -- Junction table for M:N relationship of concert and performer
 CREATE TABLE Concert_Performer ( 
-    concert_id INT,
+	concert_id INT,
     performer_id INT,
     PRIMARY KEY (concert_id, performer_id),
-    FOREIGN KEY (concert_id) REFERENCES Concert(concert_id)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT,
-    FOREIGN KEY (performer_id) REFERENCES Performer(performer_id)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT
-);
+    FOREIGN KEY (concert_id) REFERENCES Concert(concert_id),
+    FOREIGN KEY (performer_id) REFERENCES Performer(performer_id));
 
 CREATE TABLE Employee (
 employee_id INT PRIMARY KEY,
@@ -112,10 +95,7 @@ name VARCHAR(100) NOT NULL,
 role VARCHAR(100) NOT NULL,
 pay_per_concert DECIMAL(10, 2) NOT NULL,
 venue_id INT NOT NULL,
-FOREIGN KEY (venue_id) REFERENCES Venue(venue_id)
-    ON UPDATE CASCADE
-    ON DELETE RESTRICT
-);
+FOREIGN KEY (venue_id) REFERENCES Venue(venue_id));
 
 
 
@@ -188,7 +168,8 @@ INSERT INTO Employee VALUES
 (10309, 'Chris Anderson', 'Security', 210.40, 20004),
 (10310, 'Daniel Taylor', 'Production Crew', 48.03, 20005);
 
--- Auto Upgrades
+
+-- Auto Upgrades 
 DELIMITER $$ 
 CREATE TRIGGER auto_upgrade
 AFTER INSERT ON Ticket
@@ -198,7 +179,7 @@ BEGIN
       DECLARE t_total INT;
 
       IF NEW.booking_id IS NOT NULL THEN
-
+ 
           SELECT customer_id INTO c_customer_id FROM
           Booking WHERE booking_id = NEW.booking_id;
 
@@ -226,8 +207,7 @@ BEGIN
         SET NEW.purchase_date = NOW();
     END IF;
 
-    IF NEW.payment_method IS NULL OR
-       NEW.payment_method NOT IN('Card', 'CashApp', 'Paypal', 'Apple Pay', 'Visa', 'MasterCard') THEN 
+    IF NEW.payment_method NOT IN('Card', 'CashApp', 'Paypal', 'Apple Pay', 'Visa', 'MasterCard') THEN 
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Payment not supported.';
     END IF;
@@ -236,6 +216,7 @@ DELIMITER ;
 
 
 -- Trigger - set concert sold_out to true if all tickets become unavailable
+DROP TRIGGER IF EXISTS update_ticket;
 DELIMITER $$
 
 CREATE TRIGGER update_ticket
@@ -256,6 +237,36 @@ DELIMITER ;
 SELECT * FROM Concert WHERE concert_id = 30041;
 UPDATE Ticket SET booking_id = 44004 WHERE ticket_id = 62037;
 SELECT * FROM Concert WHERE concert_id = 30041;
+
+
+-- Check Loyalty Status
+CREATE VIEW loyalty AS
+SELECT c.customer_id,
+       c.name,
+       COUNT(t.ticket_id) AS total_tick_bought,
+       rt.tier_name AS current_tier,
+       rt.threshold AS current_threshold
+FROM Customer c
+JOIN Reward_Tier rt ON rt.tier_id = c.tier_id
+LEFT JOIN Booking b ON b.customer_id = c.customer_id
+LEFT JOIN Ticket t ON t.booking_id = b.booking_id
+GROUP BY c.customer_id, c.name, rt.tier_name, rt.threshold;
+
+
+-- Tier Summary
+
+CREATE VIEW tier_summary AS
+SELECT rt.tier_id,
+       rt.tier_name,
+       rt.threshold,
+       COUNT(DISTINCT c.customer_id) AS num_customers,
+       COUNT(t.ticket_id) AS total_tickets
+FROM Reward_Tier rt
+JOIN Customer c ON c.tier_id = rt.tier_id
+JOIN Booking b ON b.customer_id = c.customer_id
+JOIN Ticket t ON t.booking_id = b.booking_id
+GROUP BY rt.tier_id, rt.tier_name, rt.threshold
+ORDER BY rt.threshold;
 
 
 -- Query 1 - show all upcoming shows at Gabe's - aggregate and join
@@ -305,35 +316,6 @@ GROUP BY c.concert_id, c.concert_date;
 -- Query 5 - Show customers who purchased more than the average number of tickets
 -- Uses loyalty view and a subquery
 
--- Check Loyalty Status
-CREATE VIEW loyalty AS
-SELECT c.customer_id,
-       c.name,
-       COUNT(t.ticket_id) AS total_tick_bought,
-       rt.tier_name AS current_tier,
-       rt.threshold AS current_threshold
-FROM Customer c
-JOIN Reward_Tier rt ON rt.tier_id = c.tier_id
-LEFT JOIN Booking b ON b.customer_id = c.customer_id
-LEFT JOIN Ticket t ON t.booking_id = b.booking_id
-GROUP BY c.customer_id, c.name, rt.tier_name, rt.threshold;
-
-
--- Tier Summary
-CREATE VIEW tier_summary AS
-SELECT rt.tier_id,
-       rt.tier_name,
-       rt.threshold,
-       COUNT(DISTINCT c.customer_id) AS num_customers,
-       COUNT(t.ticket_id) AS total_tickets
-FROM Reward_Tier rt
-JOIN Customer c ON c.tier_id = rt.tier_id
-JOIN Booking b ON b.customer_id = c.customer_id
-JOIN Ticket t ON t.booking_id = b.booking_id
-GROUP BY rt.tier_id, rt.tier_name, rt.threshold
-ORDER BY rt.threshold;
-
-
 SELECT
     customer_id,
     name,
@@ -348,7 +330,7 @@ WHERE total_tick_bought > (
 
 
 
---PROCEDURE: Get Customer Bookings
+-- PROCEDURE: Get Customer Bookings
 -- Example:
 -- CALL Get_Customer_Bookings(50042);
 DELIMITER //
@@ -383,7 +365,6 @@ DELIMITER //
 
 CREATE FUNCTION Get_Concert_Revenue(concertID INT)
 RETURNS DECIMAL(10, 2)
-NOT DETERMINISTIC
 READS SQL DATA
 BEGIN
 
@@ -404,10 +385,63 @@ DELIMITER ;
 
 
 
+-- =====================================================================
+-- ACCESS CONTROL: STAFF and MANAGER roles
+-- The website picks the role from the sidebar (manager needs a password in
+-- index.php). Staff then connects to MySQL as concert_staff, so the database
+-- itself enforces the limits. Manager uses the normal db.php (root) login.
+-- Keep this in sync with $STAFF_TABLES / $STAFF_DB at the top of index.php.
+-- =====================================================================
+
+-- Saved_Query is created by the website; create it here too so staff can be
+-- granted access to it. (Not dropped above, so saved queries survive re-imports.)
+CREATE TABLE IF NOT EXISTS Saved_Query (
+    query_id INT AUTO_INCREMENT PRIMARY KEY,
+    label VARCHAR(150) NOT NULL,
+    description VARCHAR(500),
+    sql_text TEXT NOT NULL
+);
+
+-- Recreate users on every import so permission changes always apply
+DROP USER IF EXISTS 'concert_staff'@'localhost';
+DROP USER IF EXISTS 'concert_manager'@'localhost';
+
+CREATE USER 'concert_staff'@'localhost'   IDENTIFIED BY 'staff_pass_123';
+CREATE USER 'concert_manager'@'localhost' IDENTIFIED BY 'manager_pass_123';
+
+-- MANAGER: everything in this database (including Employee pay data,
+-- creating/dropping tables, views, triggers and routines)
+GRANT ALL PRIVILEGES ON ConcertTicketDB.* TO 'concert_manager'@'localhost';
+
+-- STAFF, read only: reference data
+GRANT SELECT ON ConcertTicketDB.Reward_Tier        TO 'concert_staff'@'localhost';
+GRANT SELECT ON ConcertTicketDB.Venue              TO 'concert_staff'@'localhost';
+GRANT SELECT ON ConcertTicketDB.Concert            TO 'concert_staff'@'localhost';
+GRANT SELECT ON ConcertTicketDB.Performer          TO 'concert_staff'@'localhost';
+GRANT SELECT ON ConcertTicketDB.Concert_Performer  TO 'concert_staff'@'localhost';
+
+-- STAFF, read + add + edit (no DELETE): day-to-day sales tables
+GRANT SELECT, INSERT, UPDATE ON ConcertTicketDB.Customer TO 'concert_staff'@'localhost';
+GRANT SELECT, INSERT, UPDATE ON ConcertTicketDB.Booking  TO 'concert_staff'@'localhost';
+GRANT SELECT, INSERT, UPDATE ON ConcertTicketDB.Ticket   TO 'concert_staff'@'localhost';
+
+-- STAFF: may open the views and run saved queries / routines
+GRANT SELECT ON ConcertTicketDB.loyalty        TO 'concert_staff'@'localhost';
+GRANT SELECT ON ConcertTicketDB.tier_summary   TO 'concert_staff'@'localhost';
+GRANT SELECT ON ConcertTicketDB.Saved_Query    TO 'concert_staff'@'localhost';
+GRANT EXECUTE ON PROCEDURE ConcertTicketDB.Get_Customer_Bookings TO 'concert_staff'@'localhost';
+GRANT EXECUTE ON FUNCTION  ConcertTicketDB.Get_Concert_Revenue   TO 'concert_staff'@'localhost';
+
+-- STAFF gets NO access to: Employee (pay data), and no DELETE, CREATE, DROP,
+-- ALTER or TRIGGER privileges anywhere.
+
+FLUSH PRIVILEGES;
+
+
 -- SELECT * FROM Reward_Tier;
 -- SELECT * FROM Venue;
 -- SELECT * FROM Concert;
 -- SELECT * FROM Customer;
 -- SELECT * FROM Booking;
 -- SELECT * FROM Ticket;
--- SELECT * FROM Employee
+-- SELECT * FROM Employee;
