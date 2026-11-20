@@ -159,7 +159,7 @@ INSERT INTO Employee VALUES
 (10309, 'Chris Anderson', 'Security', 210.40, 20004),
 (10310, 'Daniel Taylor', 'Production Crew', 48.03, 20005);
 
--- Query 1 - show all upcoming shows at Gabe's
+-- Query 1 - show all upcoming shows at Gabe's - aggregate and join
 SELECT 
     c.concert_id, 
     c.concert_date, 
@@ -172,7 +172,7 @@ WHERE c.venue_id = 20005
 AND c.concert_date > CURRENT_DATE
 GROUP BY c.concert_id, c.concert_date, c.start_time;
 
--- Query 2 - show all upcoming shows Tyler, the Creator is performing at
+-- Query 2 - show all upcoming shows Tyler, the Creator is performing at - join
 
 SELECT c.concert_id, c.concert_date,
 v.venue_name, v.state, v.city
@@ -184,15 +184,10 @@ ON v.venue_id = c.venue_id
 WHERE p.performer_id = 80014
 AND c.concert_date > CURRENT_DATE;
 
--- Query 3 - show all upcoming show tickets under $100
--- SELECT t.ticket_id, t.seat_type, t.price, c.concert_date,
--- , v.city, v.state
--- FROM Concert c
--- JOIN Concert_Performer p
--- ON c.concert_id = p.concert_id
--- JOIN Venue v
--- ON v.venue_id = c.venue_id
--- AND c.concert_date > CURRENT_DATE;
+-- Query 3 - calculate the total of a booking 44002 - aggregate
+SELECT COUNT(*) AS ticket_count, SUM(t.price) AS total_cost
+FROM Ticket t
+WHERE t.booking_id = 44002;
 
 
 SELECT 
