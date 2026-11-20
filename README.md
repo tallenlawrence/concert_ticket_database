@@ -1,7 +1,7 @@
 ## ConcertTicketDB
-Final project for CS:4400 Database Systems
-Group #: 8
-Members: Tallen Lawrence, Ryan Merza, Joshua Sim
+Final project for CS:4400 Database Systems\
+Group #: 8\
+Members: Tallen Lawrence, Ryan Merza, Joshua Sim\
 
 ## Project Description
 
@@ -9,4 +9,4 @@ For this project we were assigned the task of developing a full stack database s
 
 For implementation of the database, we used mySQL. For implementation of the website we used PHP.
 
-# AI use: Claude used in assistance for debugging SQL code and for development of PHP files
+#+ AI use: Claude used in assistance for debugging SQL code and for development of PHP files
